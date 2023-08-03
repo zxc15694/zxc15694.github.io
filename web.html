@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-tw">
+
+<head>
+  <title>BLE 左</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.0/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.anychart.com/releases/8.11.0/js/anychart-base.min.js"></script>
+  <style type="text/css">      
+    html, body, #container { 
+      width: 720; height: 480; margin: 0; padding: 0; 
+    } 
+  </style>
+
+
+  <script>
+
+    var _serv_uuid = '0000FFF0-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    var _char_uuid = '0000FFF1-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char2_uuid = '0000FFF2-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char3_uuid = '0000FFF3-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char4_uuid = '0000FFF4-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    var a=0,i=0,flag=0,s=0,adc1DataAV=0,adc2DataAV=0,adc3DataAV=0,adc4DataAV=0;
+    var bluetoothDevice = null;
+    var connected = false;
+    var StatusValue;
+    var notified = false;
+    var myCharacteristic;
+    var change_flag=0;
+
+    function log(v) {
+      var line = Array.prototype.slice.call(arguments).map(function (argument) {
+        return typeof argument === 'string' ? argument : JSON.stringify(argument);
+      }).join(' ');
+
+      document.querySelector('#log').textContent += line + '\n';
+      console.log(line);
+    }
+    
+
+    function _connect() {
+      document.querySelector('#log').textContent = '';
+      log('Requesting any Bluetooth Device...');
+      navigator.bluetooth.requestDevice({
+      filters: [{name: 'SimpleBLEPer'}],// SimpleBLEPer  WebBluetooth
+        //acceptAllDevices : true
+      optionalServices: [_serv_uuid]
+      })
+        .then(device => {
+          log('Connecting to GATT Server...');
+          bluetoothDevice = device;
+          bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+          return device.gatt.connect();
+        })
+        .then(server => {
+          log('Getting Service...');
+          return server.getPrimaryService(_serv_uuid);
+        })
+
+        .then(service => {
+          log('Getting Characteristic...');
+          service.getCharacteristic(_char_uuid)
+          .then(characteristic => {
+          myCharacteristic = characteristic; 
+          myCharacteristic.startNotifications()
+          .then(_ => {
+          notified = true;
+          myCharacteristic.addEventListener('characteristicvaluechanged',
+          handleNotifications);
+        })
+        })   
+          connected = true; 
+          _update();
+
+        })
+
+    }
+
+    function onDisconnected(event) {
+      log("Disconnected by remote device!");
+      bluetoothDevice = null;
+      connected = false;
+      notified = false;
+      _update();
+    }
+
+    function _disconnect() {
+      log("_disconnect");
+      if (!connected) {
+        return;
+      }
+      log('Disconnecting from Bluetooth Device...');
+      if (bluetoothDevice.gatt.connected) {
+        bluetoothDevice.gatt.disconnect();
+      } else {
+        log('> Bluetooth Device is already disconnected');
+      }
+      _update();
+    }
+
+    function _read() {
+      if (!connected)
+        return;
+        flag=flag^1;
+    }
+    function _change()
+    {
+      if (!connected)
+        return;
+      change_flag=(change_flag+1)%5;
+      log(change_flag);
+
+    }
+
+
+
+
+    function _update() {
+      if (!navigator.bluetooth) {
+        document.querySelector('#state').innerText = "Not supported!";
+        document.querySelector('#hint').innerText = "Hint: Web Bluetooth API is not available on current browser";
+        $("#install").hide();
+        document.querySelector('#connect').classList.add("disabled");
+        document.querySelector('#notify').classList.add("disabled");
+        $('input').attr('readonly', true);
+        document.querySelector('#show').classList.add("disabled");
+        document.querySelector('#read').classList.add("disabled");
+        //document.querySelector('#change').classList.add("disabled");
+        document.querySelector('#adc').classList.add("disabled");
+        $("#toggle").hide();
+        // document.querySelector('#toggle').classList.add("disabled");
+        return;
+      }
+
+      if (connected ) {
+        document.querySelector('#connect').onclick = _disconnect;
+        document.querySelector('#connect').innerText = "Disconnect";
+        document.querySelector('#connect').classList.remove("btn-primary");
+        document.querySelector('#read').onclick = _read;
+        document.querySelector('#read').classList.remove("disabled");
+        document.querySelector('#read').classList.add("btn-primary");
+       /* document.querySelector('#change').onclick = _change;
+        document.querySelector('#change').classList.remove("disabled");
+        document.querySelector('#change').classList.add("btn-primary");*/
+        document.querySelector('#state').innerText = "Connected";
+        document.querySelector('#hint').innerText = "1";
+
+      }
+      else {
+        $("#install").hide();
+        document.querySelector('#connect').onclick = _connect;
+        document.querySelector('#connect').innerText = "Connect";
+        document.querySelector('#connect').classList.add("btn-primary");
+        document.querySelector('#state').innerText = "Disconnected";
+        document.querySelector('#hint').innerText = "0";
+        $("#toggle").hide();
+      }
+    }
+    function handleNotifications(event) {
+        if (!connected )
+        return;
+        myCharacteristic .readValue()
+        .then(value => {
+          value = value.buffer ? value : new DataView(value); //value  
+          realvalue=value.getUint16(0)+value.getUint8(2)*65536;
+          realvalue2=value.getUint8(4)+value.getUint8(5)*256 +value.getUint8(6)*65536;
+          realvalue3=value.getUint16(4) +value.getUint8(10)*65536;
+          realvalue4= value.getUint8(12)+value.getUint8(13)*256 +value.getUint8(14)*65536;
+        })
+        s++;
+        //log(realvalue+' '+realvalue2+' '+realvalue3+' '+realvalue4);
+        if(flag)
+        {
+          //log(realvalue+' '+realvalue2+' '+realvalue3+' '+realvalue4);
+        chart.data.labels.push('');
+        chart.data.datasets[0].data.push(realvalue);
+        chart.data.datasets[1].data.push(realvalue2);
+        chart.data.datasets[2].data.push(realvalue3);
+        chart.data.datasets[3].data.push(realvalue4);
+        
+        if (s % 30 == 0) {
+          //judgeData(); 
+          s=0;
+        }
+
+
+        var maxLength = 120;
+            if (chart.data.labels.length > maxLength) {
+                chart.data.labels.shift();
+                for (var i = 0; i < chart.data.datasets.length; i++) {
+                    chart.data.datasets[i].data.shift();
+                }
+            }
+          chart.update();
+        }
+      
+      
+
+    }
+
+  </script>
+
+</head>
+<center>
+<body onload='_update()'> 
+  <div class="container">
+
+    <div class="page-header">
+      <canvas id="chart" width="720" height="360"></canvas>
+      <script>
+        // 创建一个Chart实例
+        var ctx = document.getElementById('chart').getContext('2d');
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // X轴标签，可根据需要进行设置
+                datasets: [
+                    {
+                        label: 'ADC 1', // 数据集名称
+                        borderColor: 'red',
+                        backgroundColor: 'transparent',
+                        data: [] // 数据集中的数据
+                    },
+                    {
+                        label: 'ADC 2',
+                        borderColor: 'blue',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'ADC 3',
+                        borderColor: 'green',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'ADC 4',
+                        borderColor: 'orange',
+                        backgroundColor: 'transparent',
+                        data: []
+                    }
+                ]
+            },
+            options: {
+              
+                responsive: true,
+                animation: {
+                  duration: 0 // 将动画持续时间设置为0，禁用动画效果
+                 },
+                scales: {
+                  x: {
+                        ticks: {
+                            stepSize: 2 // 设置刻度的间隔大小
+                        }
+                    },
+                    y: {
+                        //beginAtZero: true,
+                        suggestedMin: 5000000, // 设置Y轴的最小值
+                        suggestedMax: 7000000 // 设置Y轴的最大值*/
+                    }
+                
+                }
+            }
+        });
+    </script>
+
+    </div>
+    <div class="row">
+      <div class="col-sm-3">
+        <button id='connect' type="button" class="btn btn-lg btn-block">Connect</button>
+        <br>
+        <button id='read' type="button" class="btn btn-lg btn-block">Read</button>
+        <br>
+        <button id='toggle' type="button" class="btn btn-lg btn-block">Value</button>
+        <br>
+        <button id='install' type="button" class="btn btn-lg btn-outline-light btn-block">Install</button>
+      </div>
+
+      <div class="col-sm-9">
+        <h4 id='state'></h4>
+        <div id='hint'></div>
+        <h4>Log:</h4>
+        <pre id='log'></pre>
+      </div>
+      
+
+
+    </div>
+ </div>
+</body>
+
+</html>
