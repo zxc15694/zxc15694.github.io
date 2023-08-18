@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Loading Example</title>
+    <!-- 引入特定版本的 TensorFlow.js -->
+<!-- 引入特定版本的 TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+
+
+</head>
+<body>
+    <h1>Model Loading Example</h1>
+    <button id="load-button">Load Model</button>
+    <button id="predict-button" disabled>Predict</button>
+    <p id="prediction-result"></p>
+
+    <script>
+        let model;
+
+        async function loadModel() {
+            // JavaScript
+            //model = await tf.loadLayersModel('tfjs_model/model.json');
+            model = await tf.loadLayersModel('model.json');
+            model.summary();
+            document.getElementById('predict-button').disabled = false;
+        }
+
+        async function predict() {
+            const input = tf.tensor([/* your input data as an array */]);
+            const prediction = model.predict(input);
+            const result = prediction.dataSync()[0]; // Adjust this based on your prediction format
+            document.getElementById('prediction-result').textContent = `Prediction: ${result}`;
+        }
+
+        document.getElementById('load-button').addEventListener('click', loadModel);
+        document.getElementById('predict-button').addEventListener('click', predict);
+    </script>
+</body>
+</html>
