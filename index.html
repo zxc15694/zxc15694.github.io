@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-tw">
+
+<head>
+  <title>BLE 右</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.0/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.anychart.com/releases/8.11.0/js/anychart-base.min.js"></script>
+  <style type="text/css">      
+    html, body, #container { 
+      width: 720; height: 480; margin: 0; padding: 0; 
+    } 
+  </style>
+
+
+  <script>
+
+    var _serv_uuid = '0000FFF0-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    var _char_uuid = '0000FFF1-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char2_uuid = '0000FFF2-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char3_uuid = '0000FFF3-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    //var _char4_uuid = '0000FFF4-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    var a=0,i=0,flag=0,s=0,adc1DataAV=0,adc2DataAV=0,adc3DataAV=0,adc4DataAV=0;
+    const chartUpdateInterval = setInterval(updateChartEverySecond, 100);
+    var bluetoothDevice = null;
+    var connected = false;
+    var StatusValue;
+    var range=0x1ff;
+    var notified = false;
+    let myCharacteristic;
+    let gattOperationInProgress = false;
+    var change_flag=0,downloadCount=0,step_flag=0;
+    let step;
+    const dataR1 = [];
+    const dataR2 = [];
+    const dataR3 = [];
+    const dataR4 = [];
+    function log(v) {
+      var line = Array.prototype.slice.call(arguments).map(function (argument) {
+        return typeof argument === 'string' ? argument : JSON.stringify(argument);
+      }).join(' ');
+
+      var logElement = document.querySelector('#log');
+
+// 设置文本的字体大小
+        logElement.style.fontSize = '30px'; // 设置字体大小为20像素
+
+        // 添加文本内容
+        logElement.textContent += line + '\n';
+        console.log(line);
+    }
+    
+
+    function _connect() {
+      document.querySelector('#log').textContent = '';
+      log('Requesting any Bluetooth Device...');
+      navigator.bluetooth.requestDevice({
+      filters: [{name: 'WebBluetooth'}],// SimpleBLEPer  WebBluetooth
+        //acceptAllDevices : true
+      optionalServices: [_serv_uuid]
+      })
+        .then(device => {
+          log('Connecting to GATT Server...');
+          bluetoothDevice = device;
+          bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+          return device.gatt.connect();
+        })
+        .then(server => {
+          log('Getting Service...');
+          return server.getPrimaryService(_serv_uuid);
+        })
+
+        .then(service => {
+          log('Getting Characteristic...');
+          service.getCharacteristic(_char_uuid)
+          .then(characteristic => {
+          myCharacteristic = characteristic; 
+          myCharacteristic.startNotifications()
+          .then(_ => {
+          notified = true;
+          myCharacteristic.addEventListener('characteristicvaluechanged',
+          handleNotifications);
+        })
+        })   
+          connected = true; 
+          _update();
+
+        })
+
+    }
+
+    function onDisconnected(event) {
+      log("Disconnected by remote device!");
+      bluetoothDevice = null;
+      connected = false;
+      notified = false;
+      _update();
+    }
+
+    function _disconnect() {
+      log("_disconnect");
+      if (!connected) {
+        return;
+      }
+      log('Disconnecting from Bluetooth Device...');
+      if (bluetoothDevice.gatt.connected) {
+        bluetoothDevice.gatt.disconnect();
+      } else {
+        log('> Bluetooth Device is already disconnected');
+      }
+      _update();
+    }
+
+    function _read() {
+      if (!connected)
+        return;
+        flag=flag^1;
+    }
+    function _save()
+    {
+      loadData();
+    }
+    function _judge()
+    {
+      step_flag=step_flag^1;
+      if(step_flag)
+      {
+        step = setInterval(tojudge, 1000);
+      }
+      else
+      {
+        clearInterval(step);
+      }
+      //tojudge();
+
+    }
+
+    function tojudge()
+    {
+      var logElement = document.getElementById('log');
+      logElement.textContent = '';
+      const avg = findAverage(dataR4);
+      const result = findVValley(dataR4, avg);
+      log('平均值:'+avg);
+      log("步數:"+ result.count);
+      //log("V谷点的位置:", result.point);
+      log("週期:"+ result.period);
+
+
+    }
+
+//找平均
+function findAverage(arr) {
+const total = arr.reduce((sum, current) => sum + current, 0);
+const average = total / arr.length;
+return average;
+}
+//找步伐
+function findVValley(arr, av) {
+let count = 0;
+let point=[];
+let lastPointIndex = -10;
+
+for (let i = 0; i < arr.length - 1; i++) {
+  if (((arr[i] - av) * (arr[i + 1] - av ))<0) {
+    if((i-lastPointIndex)>10)
+    {
+    count++;
+    point.push(i);
+    lastPointIndex=i;
+    }
+  }
+
+}
+count=count*0.5;
+count = Math.round(count);
+period=findperiod(point);
+period = Math.round(period);
+return { count, point,period};
+}
+
+//找週期
+function findperiod(arr)
+{
+let sum=0;
+for (let i = 0; i < arr.length - 1; i++) {
+  sum+=(arr[i + 1]-arr[i ])
+
+}
+sum=2*(sum/(arr.length-1));
+return sum;
+}
+
+
+
+
+    function _update() {
+      if (!navigator.bluetooth) {
+        document.querySelector('#state').innerText = "Not supported!";
+        document.querySelector('#hint').innerText = "Hint: Web Bluetooth API is not available on current browser";
+        $("#install").hide();
+        document.querySelector('#connect').classList.add("disabled");
+        document.querySelector('#notify').classList.add("disabled");
+        $('input').attr('readonly', true);
+        document.querySelector('#show').classList.add("disabled");
+        document.querySelector('#read').classList.add("disabled");
+        document.querySelector('#save').classList.add("disabled");
+        document.querySelector('#judge').classList.add("disabled");
+        document.querySelector('#adc').classList.add("disabled");
+        $("#toggle").hide();
+        // document.querySelector('#toggle').classList.add("disabled");
+        return;
+      }
+
+      if (connected ) {
+        document.querySelector('#connect').onclick = _disconnect;
+        document.querySelector('#connect').innerText = "Disconnect";
+        document.querySelector('#connect').classList.remove("btn-primary");
+        document.querySelector('#read').onclick = _read;
+        document.querySelector('#read').classList.remove("disabled");
+        document.querySelector('#read').classList.add("btn-primary");
+        document.querySelector('#save').onclick = _save;
+        document.querySelector('#save').classList.remove("disabled");
+        document.querySelector('#save').classList.add("btn-primary");
+        document.querySelector('#judge').onclick = _judge;
+        document.querySelector('#judge').classList.remove("disabled");
+        document.querySelector('#judge').classList.add("btn-primary");
+        document.querySelector('#state').innerText = "Connected";
+        document.querySelector('#hint').innerText = "1";
+
+      }
+      else {
+        $("#install").hide();
+        document.querySelector('#connect').onclick = _connect;
+        document.querySelector('#connect').innerText = "Connect";
+        document.querySelector('#connect').classList.add("btn-primary");
+        document.querySelector('#state').innerText = "Disconnected";
+        document.querySelector('#hint').innerText = "0";
+        $("#toggle").hide();
+      }
+    }
+
+    let readValueInProgress = false;
+    function handleNotifications(event) {
+      if (!connected|| readValueInProgress) {
+        return;
+    }
+    readValueInProgress = true;
+        myCharacteristic .readValue()
+        .then(value => {
+          value = value.buffer ? value : new DataView(value); //value  
+          realvalue=value.getUint16(0)+value.getUint8(2)*65536;
+          realvalue2=value.getUint8(4)+value.getUint8(5)*256 +value.getUint8(6)*65536;
+          realvalue3=value.getUint16(4) +value.getUint8(10)*65536;
+          realvalue4= value.getUint8(12)+value.getUint8(13)*256 +value.getUint8(14)*65536;
+          readValueInProgress = false;
+        })
+        //log(realvalue+' '+realvalue2+' '+realvalue3+' '+realvalue4);
+        if(flag)
+        {
+        chart.data.labels.push('');
+        chart.data.datasets[0].data.push(realvalue);
+        chart.data.datasets[1].data.push(realvalue2);
+        chart.data.datasets[2].data.push(realvalue3);
+        chart.data.datasets[3].data.push(realvalue4);
+        //ring
+        dataR1[s]=realvalue;
+        dataR2[s]=realvalue2;
+        dataR3[s]=realvalue3;
+        dataR4[s]=realvalue4;
+        s++;
+        s = s & range;
+
+        /*
+          dataR1.push(realvalue);
+          dataR2.push(realvalue2);
+          dataR3.push(realvalue3);
+          dataR4.push(realvalue4);
+          
+            // Trim the dataR1 array if its length exceeds 300
+            if (dataR1.length > 500) {
+                dataR1.shift(); // Remove the oldest element
+                dataR2.shift();
+                dataR3.shift();
+                dataR4.shift();
+            }
+          
+          */
+        
+
+        var maxLength = 512;
+            if (chart.data.labels.length > maxLength) {
+                chart.data.labels.shift();
+                for (var i = 0; i < chart.data.datasets.length; i++) {
+                    chart.data.datasets[i].data.shift();
+                }
+            }
+          
+
+        }
+
+      
+      
+
+    }
+    function updateChartEverySecond() {
+    // 在这里调用 chart.update()
+    if(flag)
+    {
+    chart.update();
+    }
+}
+
+    function loadData() {
+      downloadCount++;
+   const data = {
+            array1: dataR1,
+            array2: dataR2,
+            array3: dataR3,
+            array4: dataR4,
+        };
+
+   var jsonData = JSON.stringify(data);
+
+    // 创建一个Blob对象
+    var blob = new Blob([jsonData], { type: 'application/json' });
+
+    // 创建一个下载链接
+    var downloadLink = document.createElement('a');
+    downloadLink.href = URL.createObjectURL(blob);
+    downloadLink.download = 'data' + downloadCount + '.json';// 下载的文件名
+
+    // 模拟点击下载链接
+    downloadLink.click();
+
+
+
+
+}
+  </script>
+
+</head>
+<center>
+<body onload='_update()'> 
+  <div class="container">
+
+    <div class="page-header">
+      <canvas id="chart" width="720" height="360"></canvas>
+      <script>
+        // 创建一个Chart实例
+        var ctx = document.getElementById('chart').getContext('2d');
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // X轴标签，可根据需要进行设置
+                datasets: [
+                    {
+                        label: 'ADC 1', // 数据集名称
+                        borderColor: 'red',
+                        backgroundColor: 'transparent',
+                        data: [] // 数据集中的数据
+                    },
+                    {
+                        label: 'ADC 2',
+                        borderColor: 'blue',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'ADC 3',
+                        borderColor: 'green',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'ADC 4',
+                        borderColor: 'orange',
+                        backgroundColor: 'transparent',
+                        data: []
+                    }
+                ]
+            },
+            options: {
+              
+                responsive: true,
+                animation: {
+                  duration: 0 // 将动画持续时间设置为0，禁用动画效果
+                 },
+                scales: {
+                  x: {
+                        ticks: {
+                            stepSize: 2 // 设置刻度的间隔大小
+                        }
+                    },
+                    y: {
+                        //beginAtZero: true,
+                        suggestedMin: 5000000, // 设置Y轴的最小值
+                        suggestedMax: 7000000 // 设置Y轴的最大值*/
+                    }
+                
+                }
+            }
+        });
+    </script>
+
+    </div>
+    <div class="row">
+      <div class="col-sm-3">
+        <button id='connect' type="button" class="btn btn-lg btn-block">Connect</button>
+        <br>
+        <button id='read' type="button" class="btn btn-lg btn-block">Read</button>
+        <br>
+        <button id='save' type="button" class="btn btn-lg btn-block">save</button>
+        <br>
+        <button id='judge' type="button" class="btn btn-lg btn-block">judge</button>
+        <br>
+        <button id='toggle' type="button" class="btn btn-lg btn-block">Value</button>
+        <br>
+        <button id='install' type="button" class="btn btn-lg btn-outline-light btn-block">Install</button>
+      </div>
+
+      <div class="col-sm-9">
+        <h4 id='state'></h4>
+        <div id='hint'></div>
+        <h4>Log:</h4>
+        <pre id='log'></pre>
+      </div>
+      
+
+
+    </div>
+ </div>
+</body>
+
+</html>
