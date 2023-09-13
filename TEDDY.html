@@ -1,0 +1,501 @@
+
+<html lang="zh-tw">
+
+
+<head>
+  <title>預測</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1">
+  <link rel="manifest" hreSf="manifest.json">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.0/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.anychart.com/releases/8.11.0/js/anychart-base.min.js"></script>
+</script>
+
+
+  <style type="text/css">      
+    html, body, #container { 
+      width: 720; height: 480; margin: 0; padding: 0; 
+    } 
+  </style>
+
+  <script>
+    var loadedModel;
+
+    const classN=['walk','lie','sit','bow','llying','rlying','flying','blying'];
+
+    var _serv_uuid = '0000FFF0-0000-1000-8000-00805F9B34FB'.toLowerCase();
+    var _char_uuid = '0000FFF1-0000-1000-8000-00805F9B34FB'.toLowerCase();
+   
+    var a=0,i=0,flag=0,s=0,flagL=0,sL=0,flagsave=0,flagsaveL=0;
+    const chartUpdateInterval = setInterval(updateChartEverySecond, 500);
+    var bluetoothDevice = null;
+    var connected = false;
+    var StatusValue;
+    var range=0X1FFF;
+    var notified = false;
+    var myCharacteristic;
+    var change_flag=0,downloadCount=0;
+    var maxLength =256;
+    const dataL1 = [];
+    const dataL2 = [];
+    const dataL3 = [];
+    const dataL4 = [];
+
+    const dataR1 = [];
+    const dataR2 = [];
+    const dataR3 = [];
+    const dataR4 = [];
+
+    function log(v) {
+      var line = Array.prototype.slice.call(arguments).map(function (argument) {
+        return typeof argument === 'string' ? argument : JSON.stringify(argument);
+      }).join(' ');
+
+      document.querySelector('#log').textContent += line + '\n';
+      console.log(line);
+    }
+    
+
+    function _connect() {
+      document.querySelector('#log').textContent = '';
+      //log('Requesting any Bluetooth Device...');
+      navigator.bluetooth.requestDevice({ filters: [{ name: 'WebBluetooth' }],
+      optionalServices: [_serv_uuid]
+    
+    })
+      .then(device1 => {
+        bluetoothDevice1 = device1;
+        //log('Connecting to Device1...');
+        return device1.gatt.connect();
+      })
+      .then(server1 => {
+        //log('Connected to Device1');
+
+        // 获取第一个设备的服务
+        return server1.getPrimaryService(_serv_uuid);
+      })
+      .then(service1 => {
+        log('Getting characteristics of Device1...');
+        
+        // 获取第一个设备的特征
+        return service1.getCharacteristic(_char_uuid);
+      })
+      .then(characteristic1 => {
+        //log('Got characteristic of Device1');
+        myCharacteristic = characteristic1;
+        return navigator.bluetooth.requestDevice({ filters: [{ name: 'SimpleBLEPer' }],
+        optionalServices: [_serv_uuid]  
+     });
+      })
+      .then(device2 => {
+        //log('Connecting to Device2...');
+        bluetoothDevice2 = device2;
+        bluetoothDevice2.addEventListener('gattserverdisconnected', onDisconnected);
+        return device2.gatt.connect();
+      })
+      .then(server2 => {
+        //log('Connected to Device2');
+
+        // 获取第二个设备的服务
+        return server2.getPrimaryService(_serv_uuid);
+      })
+      .then(service2 => {
+        //log('Getting characteristics of Device2...');
+
+        // 获取第二个设备的特征
+        return service2.getCharacteristic(_char_uuid);
+      })
+      .then(characteristic2 => {
+        log('Got characteristic of Device2');
+        myCharacteristic2 = characteristic2;
+        
+        connected = true; 
+        _update();
+        
+        // 在这里可以对两个设备的特征进行进一步操作
+        myCharacteristic.startNotifications()
+        .then(_ => {
+        notified = true;
+        myCharacteristic.addEventListener('characteristicvaluechanged',
+        handleNotifications);
+        })
+        myCharacteristic2.startNotifications()
+        .then(_ => {
+        notified = true;
+        myCharacteristic2.addEventListener('characteristicvaluechanged',
+        handleNotifications2);
+        })
+
+
+      })
+    
+    
+    }
+
+    function onDisconnected(event) {
+      log("Disconnected by remote device!");
+      bluetoothDevice2 = null;
+      bluetoothDevice1 = null;
+      connected = false;
+      notified = false;
+      _update();
+    }
+
+    function _disconnect() {
+      log("_disconnect");
+      if (!connected) {
+        return;
+      }
+      log('Disconnecting from Bluetooth Device...');
+      if (bluetoothDevice2.gatt.connected) {
+        bluetoothDevice2.gatt.disconnect();
+        bluetoothDevice1.gatt.disconnect();
+      } else {
+        log('> Bluetooth Device is already disconnected');
+      }
+      _update();
+    }
+
+    function _read() {
+      if (!connected)
+        return;
+
+        flag=flag^1;
+        flagL=flagL^1;
+    }
+
+
+    function _save()
+    {
+      loadData();
+    }
+
+    function _update() {
+      if (!navigator.bluetooth) {
+        document.querySelector('#state').innerText = "Not supported!";
+        document.querySelector('#hint').innerText = "Hint: Web Bluetooth API is not available on current browser";
+        $("#install").hide();
+        document.querySelector('#connect').classList.add("disabled");
+        document.querySelector('#notify').classList.add("disabled");
+        $('input').attr('readonly', true);
+        document.querySelector('#show').classList.add("disabled");
+        document.querySelector('#read').classList.add("disabled");
+        document.querySelector('#save').classList.add("disabled");
+        document.querySelector('#adc').classList.add("disabled");
+        $("#toggle").hide();
+        // document.querySelector('#toggle').classList.add("disabled");
+        return;
+      }
+
+      if (connected ) {
+        document.querySelector('#connect').onclick = _disconnect;
+        document.querySelector('#connect').innerText = "Disconnect";
+        document.querySelector('#connect').classList.remove("btn-primary");
+        document.querySelector('#read').onclick = _read;
+        document.querySelector('#read').classList.remove("disabled");
+        document.querySelector('#read').classList.add("btn-primary");
+        document.querySelector('#save').onclick = _save;
+        document.querySelector('#save').classList.remove("disabled");
+        document.querySelector('#save').classList.add("btn-primary");
+        document.querySelector('#state').innerText = "Connected";
+        document.querySelector('#hint').innerText = "1";
+
+      }
+      else {
+        $("#install").hide();
+        document.querySelector('#connect').onclick = _connect;
+        document.querySelector('#connect').innerText = "Connect";
+        document.querySelector('#connect').classList.add("btn-primary");
+        document.querySelector('#state').innerText = "Disconnected";
+        document.querySelector('#hint').innerText = "0";
+        $("#toggle").hide();
+      }
+    }
+
+    let readValueInProgress = false;
+    function handleNotifications(event) {
+        if (!connected || readValueInProgress )
+        return;
+        readValueInProgress = true;
+        myCharacteristic .readValue()
+        .then(value => {
+          value = value.buffer ? value : new DataView(value); //value  
+          realvalue=value.getUint16(0)+value.getUint8(2)*65536;
+          realvalue2=value.getUint8(4)+value.getUint8(5)*256 +value.getUint8(6)*65536;
+          realvalue3=value.getUint16(4) +value.getUint8(10)*65536;
+          realvalue4= value.getUint8(12)+value.getUint8(13)*256 +value.getUint8(14)*65536;
+          readValueInProgress = false;
+        })
+        
+        //畫圖
+        if(flag)
+        {
+          chart2.data.labels.push('');
+          chart2.data.datasets[0].data.push(realvalue);
+          chart2.data.datasets[1].data.push(realvalue2);
+          chart2.data.datasets[2].data.push(realvalue3);
+          chart2.data.datasets[3].data.push(realvalue4);
+
+          dataR1[s]=realvalue;
+          dataR2[s]=realvalue2;
+          dataR3[s]=realvalue3;
+          dataR4[s]=realvalue4;
+          s++;
+          s = s & range;
+
+          if (chart2.data.labels.length > maxLength) {
+                chart2.data.labels.shift();
+                for (var i = 0; i < chart2.data.datasets.length; i++) {
+                    chart2.data.datasets[i].data.shift();
+                }
+            }
+
+        }
+      
+      
+
+    }
+    let readValueInProgress2 = false;
+    function handleNotifications2(event) {
+      if (!connected )  //  !connected|| readValueInProgress2
+        return;
+        //readValueInProgress2 = true;
+
+        myCharacteristic2 .readValue()
+        .then(value => {
+          value = value.buffer ? value : new DataView(value); //value  
+          valueS1=value.getUint16(0)+value.getUint8(2)*65536;
+          valueS2=value.getUint8(4)+value.getUint8(5)*256 +value.getUint8(6)*65536;
+          valueS3=value.getUint16(4) +value.getUint8(10)*65536;
+          valueS4= value.getUint8(12)+value.getUint8(13)*256 +value.getUint8(14)*65536;
+         // readValueInProgress2 = false;
+
+        })
+
+        if(flagL)
+        {
+        chart.data.labels.push('');
+        chart.data.datasets[0].data.push(valueS1);
+        chart.data.datasets[1].data.push(valueS2);
+        chart.data.datasets[2].data.push(valueS3);
+        chart.data.datasets[3].data.push(valueS4);
+
+          dataL1[s]=valueS1;
+          dataL2[s]=valueS2;
+          dataL3[s]=valueS3;
+          dataL4[s]=valueS4;
+          sL++;
+          sL = sL & range;
+
+            if (chart.data.labels.length > maxLength) {
+                chart.data.labels.shift();
+                for (var i = 0; i < chart.data.datasets.length; i++) {
+                    chart.data.datasets[i].data.shift();
+                }
+            }
+
+          }
+    }
+
+    function updateChartEverySecond() {
+    // 在这里调用 chart.update()
+    if(flag & flagL)
+    {
+    chart.update();
+    chart2.update();
+    }
+}
+
+function loadData() {
+      downloadCount++;
+   const data = {
+            array1: dataL1,
+            array2: dataL2,
+            array3: dataL3,
+            array4: dataL4,
+            array5: dataR1,
+            array6: dataR2,
+            array7: dataR3,
+            array8: dataR4,
+        };
+
+   var jsonData = JSON.stringify(data);
+
+    // 创建一个Blob对象
+    var blob = new Blob([jsonData], { type: 'application/json' });
+
+    // 创建一个下载链接
+    var downloadLink = document.createElement('a');
+    downloadLink.href = URL.createObjectURL(blob);
+    downloadLink.download = 'data' + downloadCount + '.json';// 下载的文件名
+
+    // 模拟点击下载链接
+    downloadLink.click();
+
+
+
+
+}
+
+    
+
+  </script>
+
+</head>
+<center>
+<body onload='_update()'> 
+  <div class="container">
+
+    <div class="page-header">
+      </div>
+      <div class="col-sm-6">
+      <canvas id="chart" width="720" height="480"></canvas>
+      <script>
+        // 创建一个Chart实例
+        var ctx = document.getElementById('chart').getContext('2d');
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // X轴标签，可根据需要进行设置
+                datasets: [
+                    {
+                        label: 'Left 1', // 数据集名称
+                        borderColor: 'red',
+                        backgroundColor: 'transparent',
+                        data: [] // 数据集中的数据
+                    },
+                    {
+                        label: 'Left 2',
+                        borderColor: 'blue',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'Left 3',
+                        borderColor: 'green',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'Left 4',
+                        borderColor: 'orange',
+                        backgroundColor: 'transparent',
+                        data: []
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                animation: {
+                  duration: 0 // 将动画持续时间设置为0，禁用动画效果
+                 },
+                scales: {
+                  x: {
+                        ticks: {
+                            stepSize: 2 // 设置刻度的间隔大小
+                        }
+                    },
+                    y: {
+                        //beginAtZero: true,
+                        suggestedMin: 4000000, // 设置Y轴的最小值
+                        suggestedMax: 7000000 // 设置Y轴的最大值*/
+                    }
+                
+                }
+            }
+        });
+    </script>
+    </div>
+    <div class="col-sm-6">
+    <canvas id="chart2" width="720" height="480"></canvas>
+      <script>
+        // 创建一个Chart实例
+        var ctx2 = document.getElementById('chart2').getContext('2d');
+        var chart2 = new Chart(ctx2, {
+            type: 'line',
+            data: {
+                labels: [], // X轴标签，可根据需要进行设置
+                datasets: [
+                    {
+                        label: 'Right  1', // 数据集名称
+                        borderColor: 'red',
+                        backgroundColor: 'transparent',
+                        data: [] // 数据集中的数据
+                    },
+                    {
+                        label: 'Right  2',
+                        borderColor: 'blue',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'Right  3',
+                        borderColor: 'green',
+                        backgroundColor: 'transparent',
+                        data: []
+                    },
+                    {
+                        label: 'Right  4',
+                        borderColor: 'orange',
+                        backgroundColor: 'transparent',
+                        data: []
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                animation: {
+                  duration: 0 // 将动画持续时间设置为0，禁用动画效果
+                 },
+                scales: {
+                  x: {
+                        ticks: {
+                            stepSize: 2 // 设置刻度的间隔大小
+                        }
+                    },
+                    y: {
+                        //beginAtZero: true,
+                        suggestedMin: 4000000, // 设置Y轴的最小值
+                        suggestedMax: 7000000 // 设置Y轴的最大值*/
+                    }
+                
+                }
+            }
+        });
+    </script>
+    </div>
+    
+    <div class="row">
+      <div class="col-sm-3">
+        <button id='connect' type="button" class="btn btn-lg btn-block">Connect</button>
+        <br>
+        <button id='read' type="button" class="btn btn-lg btn-block">Read</button>
+        <br>
+        <button id='save' type="button" class="btn btn-lg btn-block">save</button>
+        <br>
+        <button id='toggle' type="button" class="btn btn-lg btn-block">Value</button>
+        <br>
+        <button id='install' type="button" class="btn btn-lg btn-outline-light btn-block">Install</button>
+      </div>
+
+      <div class="col-sm-9">
+        <h4 id='state'></h4>
+        <div id='hint'></div>
+        <h4>Log:</h4>
+        <pre id='log'></pre>
+      </div>
+      
+
+
+    </div>
+ </div>
+ 
+
+
+</body>
+
+</html>
