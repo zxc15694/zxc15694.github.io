@@ -289,11 +289,7 @@
           dataL4[sL]=valueS4;
           sL++;
           sL = sL & range;
-          if(full==0 & sL==8191)
-          {
-            full=1;
-            log('滿');
-          }
+
             if (chart.data.labels.length > maxLength) {
                 chart.data.labels.shift();
                 for (var i = 0; i < chart.data.datasets.length; i++) {
